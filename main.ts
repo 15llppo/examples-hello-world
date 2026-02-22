@@ -1,5 +1,6 @@
-import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 
+// 全局状态：记录当前轮到谁、谁被选中、在线人数
 let state = {
   turn: 0,
   selected: {} as Record<string, string>,
@@ -7,23 +8,31 @@ let state = {
   onlineUsers: 0,
 };
 
+// 存储所有连接的 WebSocket
 const sockets = new Set<WebSocket>();
 
+// 启动 HTTP 服务
 serve((req) => {
+  // 处理 WebSocket 连接升级
   if (req.headers.get("upgrade") === "websocket") {
     const { socket, response } = Deno.upgradeWebSocket(req);
 
+    // 新连接建立时
     socket.onopen = () => {
       state.onlineUsers++;
       sockets.add(socket);
       broadcastOnlineCount();
+      // 把当前状态发给新用户
       socket.send(JSON.stringify({ type: "state", state }));
     };
 
+    // 收到客户端消息时
     socket.onmessage = (e) => {
       const data = JSON.parse(e.data);
       if (data.type === "update") {
+        // 更新全局状态
         state = { ...state, ...data.state };
+        // 把新状态广播给所有人
         sockets.forEach((s) => {
           if (s.readyState === WebSocket.OPEN) {
             s.send(JSON.stringify({ type: "state", state }));
@@ -32,6 +41,7 @@ serve((req) => {
       }
     };
 
+    // 连接关闭时
     socket.onclose = () => {
       state.onlineUsers--;
       sockets.delete(socket);
@@ -41,11 +51,13 @@ serve((req) => {
     return response;
   }
 
+  // 提供前端 HTML 页面
   return new Response(frontendHTML, {
     headers: { "Content-Type": "text/html; charset=utf-8" },
   });
 });
 
+// 广播在线人数给所有连接
 function broadcastOnlineCount() {
   sockets.forEach((s) => {
     if (s.readyState === WebSocket.OPEN) {
@@ -54,6 +66,7 @@ function broadcastOnlineCount() {
   });
 }
 
+// 前端页面代码
 const frontendHTML = `
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -66,7 +79,7 @@ const frontendHTML = `
   body{max-width:1000px;margin:0 auto;padding:20px;background:#f5f7fa}
   h1,h2{text-align:center}
   .online-count{text-align:center;font-size:18px;font-weight:bold;color:#0d6efd;margin-bottom:10px}
-  .box{background:white;padding:20px;border-radius:12px;margin-bottom:16px;box-shadow:0 2px 8px #0001}
+  .box{background:white;padding:20px;border-radius:12px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}
   .leaders{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
   .leader{padding:10px 16px;border-radius:8px;background:#e3f2fd;font-weight:bold}
   .now{background:#0d6efd;color:white}
@@ -113,6 +126,7 @@ let state = {
   onlineUsers: 0
 };
 
+// 连接到 WebSocket
 const ws = new WebSocket(\`wss://\${window.location.host}\`);
 ws.onopen = () => {};
 ws.onmessage = (e) => {
@@ -127,10 +141,12 @@ ws.onmessage = (e) => {
   }
 };
 
+// 更新在线人数显示
 function renderOnlineCount() {
   document.getElementById('online_count').innerText = \`当前在线：\${state.onlineUsers}人\`;
 }
 
+// 渲染整个页面
 function render(){
   renderOnlineCount();
   document.getElementById('current_leader').innerText = leaders[state.turn];
@@ -156,6 +172,7 @@ function render(){
   });
 }
 
+// 点击选人时的逻辑
 function pick(e){
   const name = e.target.innerText;
   if(state.selected[name]) return;
@@ -170,6 +187,7 @@ function pick(e){
     state.turn = 0;
   }
 
+  // 把更新发送给服务器
   ws.send(JSON.stringify({type:'update', state: {
     turn: state.turn,
     selected: state.selected,
@@ -178,6 +196,7 @@ function pick(e){
   render();
 }
 
+// 初始渲染
 render();
 </script>
 </body>
